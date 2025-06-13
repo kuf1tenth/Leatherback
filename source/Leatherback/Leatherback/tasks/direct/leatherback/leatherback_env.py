@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from collections.abc import Sequence
 import isaaclab.sim as sim_utils
-from isaaclab.assets import Articulation, ArticulationCfg
+from isaaclab.assets import Articulation, ArticulationCfg, RigidObject, RigidObjectCfg
 from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
@@ -11,7 +11,9 @@ from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 from .waypoint import WAYPOINT_CFG
 from .leatherback import LEATHERBACK_CFG
+from .track import TRACK_CFG
 from isaaclab.markers import VisualizationMarkers
+
 
 @configclass
 class LeatherbackEnvCfg(DirectRLEnvCfg):
@@ -23,6 +25,7 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
     sim: SimulationCfg = SimulationCfg(dt=1 / 60, render_interval=decimation)
     robot_cfg: ArticulationCfg = LEATHERBACK_CFG.replace(prim_path="/World/envs/env_.*/Robot")
     waypoint_cfg = WAYPOINT_CFG
+    track_cfg = TRACK_CFG
 
     throttle_dof_name = [
         "Wheel__Knuckle__Front_Left",
@@ -82,6 +85,8 @@ class LeatherbackEnv(DirectRLEnv):
         # Setup rest of the scene
         self.leatherback = Articulation(self.cfg.robot_cfg)
         self.waypoints = VisualizationMarkers(self.cfg.waypoint_cfg)
+        self.track = RigidObject(self.cfg.track_cfg)
+
         self.object_state = []
         
         self.scene.clone_environments(copy_from_source=False)
