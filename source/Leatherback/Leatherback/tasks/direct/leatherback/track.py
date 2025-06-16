@@ -4,10 +4,10 @@ from isaaclab.assets import RigidObjectCfg
 import os
 
 WORKSPACE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__)))
-TRACK_USD_PATH = os.path.join(WORKSPACE_ROOT, "custom_assets", "track.usd")
+TRACK_USD_PATH = os.path.join(WORKSPACE_ROOT, "custom_assets", "track_bend.usd")
 
 TRACK_CFG = RigidObjectCfg(
-    prim_path="/World/envs/env_.*/Track",
+    #prim_path="/World/envs/env_.*/Track",
     spawn=sim_utils.UsdFileCfg(
         usd_path=TRACK_USD_PATH,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
@@ -20,7 +20,7 @@ TRACK_CFG = RigidObjectCfg(
         ),
     ),
     init_state=RigidObjectCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.0),
-        rot=(0.707, 0.0, 0.0, 0.707),  # Quaternion (w, x, y, z)
+        pos=(-10.0, 0.0, 0.0), # Initial position (x, y, z)
+        rot=(0.0, 0.0, 0.0, 1.0),  # Quaternion (w, x, y, z)
     ),
 )

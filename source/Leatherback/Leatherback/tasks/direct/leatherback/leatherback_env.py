@@ -9,11 +9,11 @@ from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
+from isaaclab.sensors import RayCasterCfg, patterns, RayCaster
 from .waypoint import WAYPOINT_CFG
 from .leatherback import LEATHERBACK_CFG
 from .track import TRACK_CFG
 from isaaclab.markers import VisualizationMarkers
-
 
 @configclass
 class LeatherbackEnvCfg(DirectRLEnvCfg):
@@ -25,7 +25,7 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
     sim: SimulationCfg = SimulationCfg(dt=1 / 60, render_interval=decimation)
     robot_cfg: ArticulationCfg = LEATHERBACK_CFG.replace(prim_path="/World/envs/env_.*/Robot")
     waypoint_cfg = WAYPOINT_CFG
-    track_cfg = TRACK_CFG
+    track_cfg: RigidObjectCfg = TRACK_CFG.replace(prim_path="/World/envs/env_.*/Track")
 
     throttle_dof_name = [
         "Wheel__Knuckle__Front_Left",
@@ -39,7 +39,7 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
     ]
 
     env_spacing = 32.0
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=env_spacing, replicate_physics=True)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1, env_spacing=env_spacing, replicate_physics=True)
 
 class LeatherbackEnv(DirectRLEnv):
     cfg: LeatherbackEnvCfg
@@ -84,14 +84,38 @@ class LeatherbackEnv(DirectRLEnv):
 
         # Setup rest of the scene
         self.leatherback = Articulation(self.cfg.robot_cfg)
-        self.waypoints = VisualizationMarkers(self.cfg.waypoint_cfg)
-        self.track = RigidObject(self.cfg.track_cfg)
-
-        self.object_state = []
         
+        self.track = RigidObject(self.cfg.track_cfg)
+        print(f"Track prim path: {self.cfg.track_cfg.prim_path}")
+
         self.scene.clone_environments(copy_from_source=False)
         self.scene.filter_collisions(global_prim_paths=[])
         self.scene.articulations["leatherback"] = self.leatherback
+
+        self.scanner = RayCaster(RayCasterCfg(
+            prim_path="/World/envs/env_.*/Robot/Rigid_Bodies/Chassis",
+            update_period=0.025,
+            offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.3), rot=(1.0, 0.0, 0.0, 0.0)),#0.707, -0.707, 0.0, 0.0
+            attach_yaw_only=True,
+            pattern_cfg=patterns.LidarPatternCfg(
+                channels=1, 
+                vertical_fov_range=(-0.5, 0.5), 
+                horizontal_fov_range=(-135, 135), 
+                horizontal_res=0.25
+            ),
+            debug_vis=True,
+            mesh_prim_paths=["/World/envs/env_0/Track"],
+            max_distance=10.0,
+        ))
+
+        self.waypoints = VisualizationMarkers(self.cfg.waypoint_cfg)
+
+        self.object_state = []
+        
+
+
+        # Add height scanner to scene
+        self.scene.sensors["scanner"] = self.scanner
 
         # Add lighting
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
@@ -110,6 +134,11 @@ class LeatherbackEnv(DirectRLEnv):
         self._steering_action = actions[:, 1].repeat_interleave(2).reshape((-1, 2)) * steering_scale
         self._steering_action = torch.clamp(self._steering_action, -steering_max, steering_max)
         self._steering_state = self._steering_action
+
+        # print("-------------------------------")
+        # print(self.scanner)
+        # print(self.scanner.data)
+        # print("-------------------------------")
 
     def _apply_action(self) -> None:
         self.leatherback.set_joint_velocity_target(self._throttle_action, joint_ids=self._throttle_dof_idx)
