@@ -14,6 +14,10 @@ from .waypoint import WAYPOINT_CFG
 from .leatherback import LEATHERBACK_CFG
 from .track import TRACK_CFG
 from isaaclab.markers import VisualizationMarkers
+from isaacsim.sensors.physx import _range_sensor
+
+
+from isaacsim.core.utils.extensions import enable_extension
 
 @configclass
 class LeatherbackEnvCfg(DirectRLEnvCfg):
@@ -38,7 +42,7 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
         "Knuckle__Upright__Front_Left",
     ]
 
-    env_spacing = 32.0
+    env_spacing = 35.0
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1, env_spacing=env_spacing, replicate_physics=True)
 
 class LeatherbackEnv(DirectRLEnv):
@@ -64,8 +68,12 @@ class LeatherbackEnv(DirectRLEnv):
         self.heading_coefficient = 0.25
         self.heading_progress_weight = 0.05
         self._target_index = torch.zeros((self.num_envs), device=self.device, dtype=torch.int32)
+        
+
 
     def _setup_scene(self):
+        
+        enable_extension("isaacsim.sensors.physx")
         # Create a large ground plane without grid
         spawn_ground_plane(
             prim_path="/World/ground",
@@ -86,27 +94,39 @@ class LeatherbackEnv(DirectRLEnv):
         self.leatherback = Articulation(self.cfg.robot_cfg)
         
         self.track = RigidObject(self.cfg.track_cfg)
-        print(f"Track prim path: {self.cfg.track_cfg.prim_path}")
+
+
 
         self.scene.clone_environments(copy_from_source=False)
         self.scene.filter_collisions(global_prim_paths=[])
         self.scene.articulations["leatherback"] = self.leatherback
+        #print(self.scene.sensors)
+        #self.scene.sensors["lidar"] = self.lidar
 
-        self.scanner = RayCaster(RayCasterCfg(
-            prim_path="/World/envs/env_.*/Robot/Rigid_Bodies/Chassis",
-            update_period=0.025,
-            offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.3), rot=(1.0, 0.0, 0.0, 0.0)),#0.707, -0.707, 0.0, 0.0
-            attach_yaw_only=True,
-            pattern_cfg=patterns.LidarPatternCfg(
-                channels=1, 
-                vertical_fov_range=(-0.5, 0.5), 
-                horizontal_fov_range=(-135, 135), 
-                horizontal_res=0.25
-            ),
-            debug_vis=True,
-            mesh_prim_paths=["/World/envs/env_0/Track"],
-            max_distance=10.0,
-        ))
+        # self.scanner = RayCaster(RayCasterCfg(
+        #     prim_path="/World/envs/env_.*/Robot/Rigid_Bodies/Chassis",
+        #     update_period=0.025,
+        #     offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.3), rot=(1.0, 0.0, 0.0, 0.0)),#0.707, -0.707, 0.0, 0.0
+        #     attach_yaw_only=True,
+        #     pattern_cfg=patterns.LidarPatternCfg(
+        #         channels=1, 
+        #         vertical_fov_range=(-0.5, 0.5), 
+        #         horizontal_fov_range=(-135, 135), 
+        #         horizontal_res=0.5 # 0.25 for 1080 beams
+        #     ),
+        #     debug_vis=True,
+        #     mesh_prim_paths=["/World/envs/env_0/Track"],
+        #     max_distance=10.0,
+        # ))
+        # Initialize lidar interface and path function
+        # for env in range(self.num_envs):
+
+        # self.lidar_path = lambda env: f"/World/envs/env_{env}/Robot/Rigid_Bodies/Chassis/Lidar/Lidar"
+        # self.lidarInterface = _range_sensor.acquire_lidar_sensor_interface()
+        # self.lidar.initialize()
+        # self.lidar_path = lambda env: f"World/envs/env_{env}/Robot/Rigid_Bodies/Chassis/Lidar_01/Lidar"
+
+        # self.lidarInterface = _range_sensor.acquire_lidar_sensor_interface()
 
         self.waypoints = VisualizationMarkers(self.cfg.waypoint_cfg)
 
@@ -115,13 +135,45 @@ class LeatherbackEnv(DirectRLEnv):
 
 
         # Add height scanner to scene
-        self.scene.sensors["scanner"] = self.scanner
+        # self.scene.sensors["scanner"] = self.scanner
 
         # Add lighting
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
+        # import omni.usd
+        self.lidarInterface = _range_sensor.acquire_lidar_sensor_interface()
+        # stage = omni.usd.get_context().get_stage()
+        # lidar_prim_path = lambda env: f"/World/envs/env_{env}/Robot/Rigid_Bodies/Chassis/Lidar_01/Lidar"
+        # self.lidar_prim = stage.GetPrimAtPath(lidar_prim_path)
+        # self.lidar = self.lidar_prim
+    
+
+
+
+
+
+
+
+
+
+
+
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
+        
+        for env in range(self.num_envs):
+            import omni.usd
+            stage = omni.usd.get_context().get_stage()
+            #print(f"stage:{stage}")
+            lidar_prim_path = f"/World/envs/env_{env}/Robot/Rigid_Bodies/Chassis/Lidar_01/Lidar"
+            self.lidar_prim = stage.GetPrimAtPath(lidar_prim_path)
+            self.lidar = self.lidar_prim
+            #print(f"lidar:{self.lidar}")
+            lidarInterface = _range_sensor.acquire_lidar_sensor_interface()
+            depth = lidarInterface.get_linear_depth_data(lidar_prim_path)
+            #print(f"env_{env}, depth:{depth}")
+
+
         throttle_scale = 10
         throttle_max = 50
         steering_scale = 0.1
@@ -253,3 +305,113 @@ class LeatherbackEnv(DirectRLEnv):
         )
         self._heading_error = torch.atan2(torch.sin(target_heading_w - heading), torch.cos(target_heading_w - heading))
         self._previous_heading_error = self._heading_error.clone()
+
+
+    def get_lidar_point_cloud(self, env_id: int = None):
+        """
+        Get point cloud data from lidar sensor for a specific environment or all environments.
+        
+        Args:
+            env_id: Environment ID to get lidar data from. If None, returns data for all environments.
+            
+        Returns:
+            Point cloud data as numpy array or list of arrays for all environments.
+        """
+        if env_id is not None:
+            # Get data for specific environment
+            path = self.lidar_path(env_id)
+            return self.lidarInterface.get_point_cloud_data(path)
+        else:
+            # Get data for all environments
+            point_clouds = []
+            for env in range(self.num_envs):
+                path = self.lidar_path(env)
+                pointcloud = self.lidarInterface.get_point_cloud_data(path)
+                point_clouds.append(pointcloud)
+            return point_clouds
+
+    def get_lidar_depth_data(self, env_id: int = None):
+        """
+        Get depth data from lidar sensor for a specific environment or all environments.
+        
+        Args:
+            env_id: Environment ID to get lidar data from. If None, returns data for all environments.
+            
+        Returns:
+            Depth data as numpy array or list of arrays for all environments.
+        """
+        if env_id is not None:
+            # Get data for specific environment
+            path = self.lidar_path(env_id)
+            return self.lidarInterface.get_depth_data(path)
+        else:
+            # Get data for all environments
+            depth_data = []
+            for env in range(self.num_envs):
+                path = self.lidar_path(env)
+                depth = self.lidarInterface.get_depth_data(path)
+                depth_data.append(depth)
+            return depth_data
+
+    def get_lidar_linear_depth_data(self, env_id: int = None):
+        """
+        Get linear depth data from lidar sensor for a specific environment or all environments.
+        
+        Args:
+            env_id: Environment ID to get lidar data from. If None, returns data for all environments.
+            
+        Returns:
+            Linear depth data as numpy array or list of arrays for all environments.
+        """
+        if env_id is not None:
+            # Get data for specific environment
+            path = self.lidar_path(env_id)
+            return self.lidarInterface.get_linear_depth_data(path)
+        else:
+            # Get data for all environments
+            linear_depth_data = []
+            for env in range(self.num_envs):
+                path = self.lidar_path(env)
+                linear_depth = self.lidarInterface.get_linear_depth_data(path)
+                linear_depth_data.append(linear_depth)
+            return linear_depth_data
+
+    def get_lidar_intensity_data(self, env_id: int = None):
+        """
+        Get intensity data from lidar sensor for a specific environment or all environments.
+        
+        Args:
+            env_id: Environment ID to get lidar data from. If None, returns data for all environments.
+            
+        Returns:
+            Intensity data as numpy array or list of arrays for all environments.
+        """
+        if env_id is not None:
+            # Get data for specific environment
+            path = self.lidar_path(env_id)
+            return self.lidarInterface.get_intensity_data(path)
+        else:
+            # Get data for all environments
+            intensity_data = []
+            for env in range(self.num_envs):
+                path = self.lidar_path(env)
+                intensity = self.lidarInterface.get_intensity_data(path)
+                intensity_data.append(intensity)
+            return intensity_data
+
+    def get_all_lidar_data(self, env_id: int = None):
+        """
+        Get all available lidar data (point cloud, depth, linear depth, intensity) for environments.
+        
+        Args:
+            env_id: Environment ID to get lidar data from. If None, returns data for all environments.
+            
+        Returns:
+            Dictionary containing all lidar data types.
+        """
+        return {
+            'point_cloud': self.get_lidar_point_cloud(env_id),
+            'depth': self.get_lidar_depth_data(env_id),
+            'linear_depth': self.get_lidar_linear_depth_data(env_id),
+            'intensity': self.get_lidar_intensity_data(env_id)
+        }
