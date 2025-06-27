@@ -24,8 +24,8 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
     decimation = 4
     episode_length_s = 20.0
     action_space = 2
-    observation_space = 8
-    state_space = 0
+    observation_space = 540
+    state_space = 540
     sim: SimulationCfg = SimulationCfg(dt=1 / 60, render_interval=decimation)
     robot_cfg: ArticulationCfg = LEATHERBACK_CFG.replace(prim_path="/World/envs/env_.*/Robot")
     waypoint_cfg = WAYPOINT_CFG
@@ -95,47 +95,14 @@ class LeatherbackEnv(DirectRLEnv):
         
         self.track = RigidObject(self.cfg.track_cfg)
 
-
-
         self.scene.clone_environments(copy_from_source=False)
         self.scene.filter_collisions(global_prim_paths=[])
         self.scene.articulations["leatherback"] = self.leatherback
-        #print(self.scene.sensors)
-        #self.scene.sensors["lidar"] = self.lidar
-
-        # self.scanner = RayCaster(RayCasterCfg(
-        #     prim_path="/World/envs/env_.*/Robot/Rigid_Bodies/Chassis",
-        #     update_period=0.025,
-        #     offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.3), rot=(1.0, 0.0, 0.0, 0.0)),#0.707, -0.707, 0.0, 0.0
-        #     attach_yaw_only=True,
-        #     pattern_cfg=patterns.LidarPatternCfg(
-        #         channels=1, 
-        #         vertical_fov_range=(-0.5, 0.5), 
-        #         horizontal_fov_range=(-135, 135), 
-        #         horizontal_res=0.5 # 0.25 for 1080 beams
-        #     ),
-        #     debug_vis=True,
-        #     mesh_prim_paths=["/World/envs/env_0/Track"],
-        #     max_distance=10.0,
-        # ))
-        # Initialize lidar interface and path function
-        # for env in range(self.num_envs):
-
-        # self.lidar_path = lambda env: f"/World/envs/env_{env}/Robot/Rigid_Bodies/Chassis/Lidar/Lidar"
-        # self.lidarInterface = _range_sensor.acquire_lidar_sensor_interface()
-        # self.lidar.initialize()
-        # self.lidar_path = lambda env: f"World/envs/env_{env}/Robot/Rigid_Bodies/Chassis/Lidar_01/Lidar"
-
-        # self.lidarInterface = _range_sensor.acquire_lidar_sensor_interface()
 
         self.waypoints = VisualizationMarkers(self.cfg.waypoint_cfg)
 
         self.object_state = []
         
-
-
-        # Add height scanner to scene
-        # self.scene.sensors["scanner"] = self.scanner
 
         # Add lighting
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
@@ -151,27 +118,9 @@ class LeatherbackEnv(DirectRLEnv):
 
 
 
-
-
-
-
-
-
-
-
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         
-        for env in range(self.num_envs):
-            import omni.usd
-            stage = omni.usd.get_context().get_stage()
-            #print(f"stage:{stage}")
-            lidar_prim_path = f"/World/envs/env_{env}/Robot/Rigid_Bodies/Chassis/Lidar_01/Lidar"
-            self.lidar_prim = stage.GetPrimAtPath(lidar_prim_path)
-            self.lidar = self.lidar_prim
-            #print(f"lidar:{self.lidar}")
-            lidarInterface = _range_sensor.acquire_lidar_sensor_interface()
-            depth = lidarInterface.get_linear_depth_data(lidar_prim_path)
-            #print(f"env_{env}, depth:{depth}")
+
 
 
         throttle_scale = 10
@@ -197,6 +146,24 @@ class LeatherbackEnv(DirectRLEnv):
         self.leatherback.set_joint_position_target(self._steering_state, joint_ids=self._steering_dof_idx)
 
     def _get_observations(self) -> dict:
+        self.depths = []
+        for env in range(self.num_envs):
+            import omni.usd
+            stage = omni.usd.get_context().get_stage()
+            #print(f"stage:{stage}")
+            lidar_prim_path = f"/World/envs/env_{env}/Robot/Rigid_Bodies/Chassis/Lidar_01/Lidar"
+            self.lidar_prim = stage.GetPrimAtPath(lidar_prim_path)
+            self.lidar = self.lidar_prim
+            #print(f"lidar:{self.lidar}")
+            lidarInterface = _range_sensor.acquire_lidar_sensor_interface()
+            depth = lidarInterface.get_linear_depth_data(lidar_prim_path)
+            depth_tensor = torch.tensor(depth)  # Convert depth to tensor and add batch dimension
+            
+            self.depths.append(depth_tensor)
+            #print(f"env_{env}, depth:{depth}")
+
+        depths_tensor = torch.stack(self.depths)
+        #print(f"depths:{depths_tensor.squeeze(-1)}") #TODO: Remove this print statement in production code
         current_target_positions = self._target_positions[self.leatherback._ALL_INDICES, self._target_index]
         self._position_error_vector = current_target_positions - self.leatherback.data.root_pos_w[:, :2]
         self._previous_position_error = self._position_error.clone()
@@ -208,21 +175,28 @@ class LeatherbackEnv(DirectRLEnv):
             self._target_positions[self.leatherback._ALL_INDICES, self._target_index, 0] - self.leatherback.data.root_link_pos_w[:, 0],
         )
         self.target_heading_error = torch.atan2(torch.sin(target_heading_w - heading), torch.cos(target_heading_w - heading))
-
-        obs = torch.cat(
-            (
-                self._position_error.unsqueeze(dim=1),
-                torch.cos(self.target_heading_error).unsqueeze(dim=1),
-                torch.sin(self.target_heading_error).unsqueeze(dim=1),
-                self.leatherback.data.root_lin_vel_b[:, 0].unsqueeze(dim=1),
-                self.leatherback.data.root_lin_vel_b[:, 1].unsqueeze(dim=1),
-                self.leatherback.data.root_ang_vel_w[:, 2].unsqueeze(dim=1),
-                self._throttle_state[:, 0].unsqueeze(dim=1),
-                self._steering_state[:, 0].unsqueeze(dim=1),
-            ),
-            dim=-1,
-        )
         
+        #print(self._position_error.unsqueeze(dim=1))
+        # obs = torch.cat(
+        #     (
+        #         self._position_error.unsqueeze(dim=1),
+        #         torch.cos(self.target_heading_error).unsqueeze(dim=1),
+        #         torch.sin(self.target_heading_error).unsqueeze(dim=1),
+        #         self.leatherback.data.root_lin_vel_b[:, 0].unsqueeze(dim=1),
+        #         self.leatherback.data.root_lin_vel_b[:, 1].unsqueeze(dim=1),
+        #         self.leatherback.data.root_ang_vel_w[:, 2].unsqueeze(dim=1),
+        #         #self.depths_tensor,  # Assuming depth is a single value for simplicity
+        #         #self._throttle_state[:, 0].unsqueeze(dim=1),
+        #         #self._steering_state[:, 0].unsqueeze(dim=1),
+                
+        #     ),
+        #     dim=-1,
+        # )
+
+        obs = depths_tensor.squeeze(-1).to(self.device) 
+        #print(f"obs:{obs}") #TODO: Remove this print statement in production code
+
+        #print(depths_tensor.squeeze(-1).to(self.device)) #TODO: Remove this print statement in production code
         if torch.any(obs.isnan()):
             raise ValueError("Observations cannot be NAN")
 
