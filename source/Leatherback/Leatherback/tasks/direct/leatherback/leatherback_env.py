@@ -194,9 +194,7 @@ class LeatherbackEnv(DirectRLEnv):
         # )
 
         obs = depths_tensor.squeeze(-1).to(self.device) 
-        #print(f"obs:{obs}") #TODO: Remove this print statement in production code
 
-        #print(depths_tensor.squeeze(-1).to(self.device)) #TODO: Remove this print statement in production code
         if torch.any(obs.isnan()):
             raise ValueError("Observations cannot be NAN")
 
@@ -221,6 +219,7 @@ class LeatherbackEnv(DirectRLEnv):
         self.waypoints.visualize(marker_indices=marker_indices)
 
         if torch.any(composite_reward.isnan()):
+            print(composite_reward)
             raise ValueError("Rewards cannot be NAN")
 
         return composite_reward

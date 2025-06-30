@@ -13,8 +13,15 @@ models:
     max_log_std: 2.0
     initial_log_std: 0.0
     network:
+      - name: features_extractor
+        input: STATES.unsqueeze(1).unsqueeze(2)  # Add dimensions: [batch, 8] -> [batch, 8, 1, 1]
+        layers:
+          - conv2d: {out_channels: 16, kernel_size: [1, 3], stride: [1, 1], padding: [0, 1]}
+          - conv2d: {out_channels: 32, kernel_size: [1, 3], stride: [1, 1], padding: [0, 1]}
+          - conv2d: {out_channels: 32, kernel_size: [1, 3], stride: [1, 1], padding: [0, 1]}
+          - flatten
       - name: net
-        input: STATES
+        input: features_extractor
         layers: [100, 50, 10]
         activations: elu
     output: ACTIONS
@@ -22,8 +29,15 @@ models:
     class: DeterministicMixin
     clip_actions: False
     network:
+      - name: features_extractor
+        input: STATES.unsqueeze(1).unsqueeze(2)  # Add dimensions: [batch, 8] -> [batch, 8, 1, 1]
+        layers:
+          - conv2d: {out_channels: 16, kernel_size: [1, 3], stride: [1, 1], padding: [0, 1]}
+          - conv2d: {out_channels: 32, kernel_size: [1, 3], stride: [1, 1], padding: [0, 1]}
+          - conv2d: {out_channels: 32, kernel_size: [1, 3], stride: [1, 1], padding: [0, 1]}
+          - flatten
       - name: net
-        input: STATES
+        input: features_extractor
         layers: [100, 50, 10]
         activations: elu
     output: ONE
@@ -76,5 +90,5 @@ agent:
 # https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
 trainer:
   class: SequentialTrainer
-  timesteps: 64000 #9600
+  timesteps: 9600
   environment_info: log
