@@ -4,15 +4,61 @@ from isaaclab.assets import RigidObjectCfg
 import os
 
 WORKSPACE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__)))
-TRACK_USD_PATH = os.path.join(WORKSPACE_ROOT, "custom_assets", "track.usd")
+OUTER_TRACK_V1_USD_PATH = os.path.join(WORKSPACE_ROOT, "custom_assets", "Outer_Track_V1.usd")
+INNER_TRACK_V1_USD_PATH = os.path.join(WORKSPACE_ROOT, "custom_assets", "Inner_Track_V1.usd")
 
-TRACK_CFG = RigidObjectCfg(
-    #prim_path="/World/envs/env_.*/Track",
+OUTER_TRACK_V2_USD_PATH = os.path.join(WORKSPACE_ROOT, "custom_assets", "Outer_Track_V2.usd")
+INNER_TRACK_V2_USD_PATH = os.path.join(WORKSPACE_ROOT, "custom_assets", "Inner_Track_V2.usd")
+
+
+OUTER_TRACK_V1_CFG = RigidObjectCfg(
+    #prim_path="/World/envs/env_.*/Outer_Track",
     spawn=sim_utils.UsdFileCfg(
-        usd_path=TRACK_USD_PATH,
+        usd_path=OUTER_TRACK_V1_USD_PATH,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             rigid_body_enabled=True,
-            disable_gravity=False,
+            kinematic_enabled=True,
+            disable_gravity=True,
+        ),
+        collision_props=sim_utils.CollisionPropertiesCfg(
+            collision_enabled=True,
+            contact_offset=0.01,
+        ),
+    ),
+        init_state=RigidObjectCfg.InitialStateCfg(
+        pos=(-1.0, 1.0, 0.0), # Initial position (x, y, z)
+        rot=(0.707, 0.0, 0.0, -0.707),  # Quaternion (w, x, y, z)
+    ),
+)
+
+INNER_TRACK_V1_CFG = RigidObjectCfg(
+    #prim_path="/World/envs/env_.*/Inner_Track",
+    spawn=sim_utils.UsdFileCfg(
+        usd_path=INNER_TRACK_V1_USD_PATH,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            rigid_body_enabled=True,
+            kinematic_enabled=True,
+            disable_gravity=True,
+        ),
+        collision_props=sim_utils.CollisionPropertiesCfg(
+            collision_enabled=True,
+            contact_offset=0.01,
+        ),
+    ),
+
+    init_state=RigidObjectCfg.InitialStateCfg(
+        pos=(-1.0, 1.0, 0.0), # Initial position (x, y, z)
+        rot=(0.707, 0.0, 0.0, -0.707),  # Quaternion (w, x, y, z)
+    ),
+)
+
+OUTER_TRACK_V2_CFG = RigidObjectCfg(
+    spawn=sim_utils.UsdFileCfg(
+        usd_path=OUTER_TRACK_V2_USD_PATH,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            rigid_body_enabled=True,
+            kinematic_enabled=True,
+            disable_gravity=True,
         ),
         collision_props=sim_utils.CollisionPropertiesCfg(
             collision_enabled=True,
@@ -20,7 +66,26 @@ TRACK_CFG = RigidObjectCfg(
         ),
     ),
     init_state=RigidObjectCfg.InitialStateCfg(
-        pos=(-18.0, 5.0, 0.0), # Initial position (x, y, z)
-        rot=(0.707, 0.0, 0.0, -0.707),  # Quaternion (w, x, y, z)
+        pos=(-1.0, 1.0, 0.0),
+        rot=(0.707, 0.0, 0.0, -0.707),
+    ),
+)
+
+INNER_TRACK_V2_CFG = RigidObjectCfg(
+    spawn=sim_utils.UsdFileCfg(
+        usd_path=INNER_TRACK_V2_USD_PATH,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            rigid_body_enabled=True,
+            kinematic_enabled=True,
+            disable_gravity=True,
+        ),
+        collision_props=sim_utils.CollisionPropertiesCfg(
+            collision_enabled=True,
+            contact_offset=0.01,
+        ),
+    ),
+    init_state=RigidObjectCfg.InitialStateCfg(
+        pos=(-1.0, 1.0, 0.0),
+        rot=(0.707, 0.0, 0.0, -0.707),
     ),
 )
