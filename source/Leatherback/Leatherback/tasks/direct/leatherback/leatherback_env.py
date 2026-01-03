@@ -11,7 +11,7 @@ from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 from isaaclab.sensors import RayCasterCfg, patterns, RayCaster
 from .leatherback import LEATHERBACK_CFG
-from .track import OUTER_TRACK_V1_CFG, INNER_TRACK_V1_CFG, OUTER_TRACK_V2_CFG, INNER_TRACK_V2_CFG
+from .track import OUTER_TRACK_V1_CFG, OUTER_TRACK_V2_CFG, INNER_TRACK_V1_CFG, INNER_TRACK_V2_CFG
 from isaacsim.sensors.physx import _range_sensor
 
 
@@ -27,17 +27,14 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
     sim: SimulationCfg = SimulationCfg(dt=1 / 60, render_interval=decimation)
     robot_cfg: ArticulationCfg = LEATHERBACK_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
-    track_variants = [
-        {
-            "outer": OUTER_TRACK_V1_CFG.replace(prim_path="/World/envs/env_.*/Outer_Track"),
-            "inner": INNER_TRACK_V1_CFG.replace(prim_path="/World/envs/env_.*/Inner_Track")
-        }#,
-        # {
-        #     "outer": OUTER_TRACK_V2_CFG.replace(prim_path="/World/envs/env_.*/Outer_Track"),
-        #     "inner": INNER_TRACK_V2_CFG.replace(prim_path="/World/envs/env_.*/Inner_Track")
-        # }
-
-    ]
+    # Individual track configs - spawn all variants and toggle visibility during resets
+    outer_track_v1_cfg: RigidObjectCfg = OUTER_TRACK_V1_CFG.replace(prim_path="/World/envs/env_.*/Outer_Track_V1")
+    outer_track_v2_cfg: RigidObjectCfg = OUTER_TRACK_V2_CFG.replace(prim_path="/World/envs/env_.*/Outer_Track_V2")
+    inner_track_v1_cfg: RigidObjectCfg = INNER_TRACK_V1_CFG.replace(prim_path="/World/envs/env_.*/Inner_Track_V1")
+    inner_track_v2_cfg: RigidObjectCfg = INNER_TRACK_V2_CFG.replace(prim_path="/World/envs/env_.*/Inner_Track_V2")
+    
+    # Number of track variants available
+    num_track_variants = 2
 
     throttle_dof_name = [
         "Wheel__Knuckle__Front_Left",
@@ -51,7 +48,8 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
     ]
 
     env_spacing = 60.0
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1, env_spacing=env_spacing, replicate_physics=True)
+    # IMPORTANT: replicate_physics must be False when using MultiUsdFileCfg for random asset spawning
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1, env_spacing=env_spacing, replicate_physics=False)
 
 class LeatherbackEnv(DirectRLEnv):
     cfg: LeatherbackEnvCfg
@@ -64,12 +62,6 @@ class LeatherbackEnv(DirectRLEnv):
         self._steering_state = torch.zeros((self.num_envs,2), device=self.device, dtype=torch.float32)
         self.task_completed = torch.zeros((self.num_envs), device=self.device, dtype=torch.bool)
         self.env_spacing = self.cfg.env_spacing
-
-        self._env_track_indices = torch.randint(
-            0, len(self.cfg.track_variants), 
-            (self.num_envs,), 
-            device=self.device
-        )
         
         # Lidar-based reward parameters
         self.forward_velocity_weight = 10.5  # Reward for driving fast
@@ -98,10 +90,12 @@ class LeatherbackEnv(DirectRLEnv):
         # Store lidar depths for reward calculation
         self._lidar_depths = None
         
+        # Track which track variant is active for each environment (0 or 1)
+        self._active_track_variant = torch.zeros((self.num_envs,), device=self.device, dtype=torch.int32)
+        
 
 
     def _setup_scene(self):
-        
         enable_extension("isaacsim.sensors.physx")
         # Create a large ground plane without grid
         spawn_ground_plane(
@@ -122,30 +116,26 @@ class LeatherbackEnv(DirectRLEnv):
         # Setup rest of the scene
         self.leatherback = Articulation(self.cfg.robot_cfg)
         
-        self.outer_tracks = []
-        self.inner_tracks = []
-
-
-        # self.outer_track = RigidObject(self.cfg.outer_track_cfg)
-        # self.inner_track = RigidObject(self.cfg.inner_track_cfg)
-
-        for i, track_cfg in enumerate(self.cfg.track_variants):
-            outer_track = RigidObject(
-                track_cfg["outer"].replace(
-                    prim_path=f"/World/envs/env_.*/Outer_Track_V{i}"
-                )
-            )
-            inner_track = RigidObject(
-                track_cfg["inner"].replace(
-                    prim_path=f"/World/envs/env_.*/Inner_Track_V{i}"
-                )
-            )
-            self.outer_tracks.append(outer_track)
-            self.inner_tracks.append(inner_track)
+        # Spawn ALL track variants - we'll toggle visibility/position during resets
+        # This allows random track selection at reset time rather than just at spawn time
+        self.outer_track_v1 = RigidObject(self.cfg.outer_track_v1_cfg)
+        self.outer_track_v2 = RigidObject(self.cfg.outer_track_v2_cfg)
+        self.inner_track_v1 = RigidObject(self.cfg.inner_track_v1_cfg)
+        self.inner_track_v2 = RigidObject(self.cfg.inner_track_v2_cfg)
+        
+        # Store track pairs for easy access during resets
+        self._track_variants = [
+            (self.outer_track_v1, self.inner_track_v1),  # Variant 0
+            (self.outer_track_v2, self.inner_track_v2),  # Variant 1
+        ]
 
         self.scene.clone_environments(copy_from_source=False)
         self.scene.filter_collisions(global_prim_paths=[])
         self.scene.articulations["leatherback"] = self.leatherback
+        self.scene.rigid_objects["outer_track_v1"] = self.outer_track_v1
+        self.scene.rigid_objects["outer_track_v2"] = self.outer_track_v2
+        self.scene.rigid_objects["inner_track_v1"] = self.inner_track_v1
+        self.scene.rigid_objects["inner_track_v2"] = self.inner_track_v2
 
         self.object_state = []
         
@@ -384,26 +374,43 @@ class LeatherbackEnv(DirectRLEnv):
             env_ids = self.leatherback._ALL_INDICES
         super()._reset_idx(env_ids)
 
-        num_reset = len(env_ids)
-
-        self._env_track_indices[env_ids] = torch.randint(
-            0, len(self.cfg.track_variants),
-            (num_reset,),
-            device=self.device
-        )
+        # Randomly select track variant for each resetting environment
+        # Convert env_ids to tensor if needed
+        env_ids_tensor = torch.tensor(env_ids, device=self.device) if not isinstance(env_ids, torch.Tensor) else env_ids
+        num_reset_envs = len(env_ids_tensor)
         
-        # Hide all tracks first, then show only the selected ones
-        for env_idx in env_ids:
-            track_variant = self._env_track_indices[env_idx].item()
+        # Randomly select which track variant to use (0 or 1)
+        new_variants = torch.randint(0, self.cfg.num_track_variants, (num_reset_envs,), device=self.device, dtype=torch.int32)
+        self._active_track_variant[env_ids_tensor] = new_variants
+        
+        # Position offset to "hide" inactive tracks (move them far away)
+        hide_offset = torch.tensor([0.0, 0.0, -1000.0], device=self.device)  # Move underground
+        show_offset = torch.tensor([0.0, 0.0, 0.0], device=self.device)  # Normal position
+        
+        # Update track positions based on which variant is active
+        for env_idx, env_id in enumerate(env_ids_tensor):
+            variant = new_variants[env_idx].item()
+            env_origin = self.scene.env_origins[env_id]
             
-            # Hide all track variants for this environment
-            for i in range(len(self.cfg.track_variants)):
-                if i != track_variant:
-                    # Hide non-selected tracks (you'll need to implement visibility toggling)
-                    pass
-            
-            # Show selected track variant (implement visibility toggling)
-            pass
+            # For each track variant, show the active one and hide the inactive one
+            for var_idx, (outer_track, inner_track) in enumerate(self._track_variants):
+                # Get default positions from the track's initial state
+                default_pos = torch.tensor([[-1.0, 1.0, 0.0]], device=self.device)
+                default_rot = torch.tensor([[0.707, 0.0, 0.0, -0.707]], device=self.device)
+                
+                if var_idx == variant:
+                    # Show this track variant (at normal position)
+                    track_pos = default_pos + env_origin.unsqueeze(0) + show_offset
+                else:
+                    # Hide this track variant (move underground)
+                    track_pos = default_pos + env_origin.unsqueeze(0) + hide_offset
+                
+                # Create full pose tensor [x, y, z, qw, qx, qy, qz]
+                track_pose = torch.cat([track_pos, default_rot], dim=-1)
+                
+                # Write pose for this specific environment
+                outer_track.write_root_pose_to_sim(track_pose, torch.tensor([env_id], device=self.device))
+                inner_track.write_root_pose_to_sim(track_pose, torch.tensor([env_id], device=self.device))
 
         default_state = self.leatherback.data.default_root_state[env_ids]
         leatherback_pose = default_state[:, :7] # x, y, z, qw, qx, qy, qz
